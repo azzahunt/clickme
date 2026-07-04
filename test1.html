@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>testerss</title>
+  </head>
+  <body>
+    <button
+      id="startBtn"
+      style="
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 15px 30px;
+        font-size: 18px;
+        background: #007aff;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        cursor: pointer;
+        z-index: 10000;
+      "
+    >
+      CLICK HERE
+    </button>
+
+    <script>
+      document.getElementById("startBtn").onclick = function () {
+        this.remove();
+
+        document.open();
+        document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head><title>page demo</title></head>
+        <body style="margin:0;padding:0;background:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;font-family:system-ui">
+          <div>
+            <h1 style="font-size:96px;font-weight:bold;color:red;margin:0 0 30px 0">THIS IS NOT APPLE</h1>
+          </div>
+        </body>
+        </html>
+      `);
+        document.close();
+
+        setTimeout(() => {
+          try {
+            window.stop();
+          } catch (e) {}
+          try {
+            const sab = new SharedArrayBuffer(4);
+            const view = new Int32Array(sab);
+            Atomics.wait(view, 0, 0, 99999);
+          } catch (e) {
+            while (true) {}
+          }
+        }, 1);
+      };
+    </script>
+  </body>
+</html>
