@@ -1,0 +1,65 @@
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>clicklickenterenter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+
+        #fileList {
+            margin: 20px;
+        }
+
+        input {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <center>
+        <h1>PLEASE SPAM THE ENTER BUTTON 2-3X QUICKLY TO WIN A PRIZE OF $100,000</h1>
+    </center>
+    <input type="file" id="fileInput" webkitdirectory>
+    <div id="fileList"></div>
+
+    <script>
+
+
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') {
+                event.preventDefault(); 
+                document.getElementById('fileInput').showPicker();
+                setTimeout(() => {
+                    alert("PRESS THE ENTER BUTTON REPEATEDLY 2 TO 3 MORE TIMES QUICKLY");
+            }, 500);
+               
+
+            }
+        });
+        document.getElementById('fileInput').addEventListener('change', function (event) {
+            const fileList = document.getElementById('fileList');
+            fileList.innerHTML = '';
+
+            const files = event.target.files;
+            if (files.length === 0) {
+                fileList.innerHTML = 'No files selected.';
+                return;
+            }
+
+            const ul = document.createElement('ul');
+            for (const file of files) {
+                const li = document.createElement('li');
+                li.textContent = file.webkitRelativePath;
+                ul.appendChild(li);
+            }
+            fileList.appendChild(ul);
+        });
+    </script>
+
+    
+</body>
+
+</html>
