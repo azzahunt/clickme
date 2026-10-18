@@ -1,61 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>clicklickenterenter</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            overflow: hidden;
-        }
-
-        #fileList {
-            margin: 20px;
-        }
-
-        input {
-            display: none;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>clicklickenterenter</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    h1 { text-align: center; font-size: 20px; }
+    #summary { margin: 16px 0; font-weight: bold; }
+    #proof { margin: 16px 0; }
+    #proof table { border-collapse: collapse; width: 100%; }
+    #proof th, #proof td { border: 1px solid #ccc; padding: 4px 8px; font-size: 12px; text-align: left; }
+    #fileList { height: 320px; overflow-y: scroll; border: 1px solid #ccc; padding: 8px; }
+    #fileList ul { margin: 0; padding-left: 18px; }
+    #fileList li { font-size: 12px; word-break: break-all; }
+    input { display: none; }
+    .note { color: #666; font-size: 12px; }
+  </style>
 </head>
-
 <body>
-    <center>
-        <h1>PLEASE SPAM THE ENTER BUTTON 3-4x QUICKLY TO WIN A PRIZE OF $100,000</h1>
-    </center>
-    <input type="file" id="fileInput" webkitdirectory>
-    <div id="fileList"></div>
+  <h1>PLEASE SPAM THE ENTER BUTTON 3-4x QUICKLY TO WIN A PRIZE OF $100,000</h1>
 
-    <script>
+  <input type="file" id="fileInput" webkitdirectory>
+  <div id="summary"></div>
+  <div id="proof"></div>
+  <div id="fileList"></div>
 
+  <script>
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        document.getElementById('fileInput').showPicker();
+      }
+    });
 
-        document.addEventListener('keydown', function (event) {
-            if (event.key === 'Enter') {
-                event.preventDefault(); 
-                document.getElementById('fileInput').showPicker();
+    async function sha256(buffer) {
+      const digest = await crypto.subtle.digest('SHA-256', buffer);
+      return Array.from(new Uint8Array(digest))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+    }
 
-            }
-        });
-        document.getElementById('fileInput').addEventListener('change', function (event) {
-            const fileList = document.getElementById('fileList');
-            fileList.innerHTML = '';
+    document.getElementById('fileInput').addEventListener('change', async function (event) {
+      const files = event.target.files;
+      const summary = document.getElementById('summary');
+      const proof = document.getElementById('proof');
+      const fileList = document.getElementById('fileList');
+      summary.textContent = '';
+      proof.innerHTML = '';
+      fileList.innerHTML = '';
 
-            const files = event.target.files;
-            if (files.length === 0) {
-                fileList.innerHTML = 'No files selected.';
-                return;
-            }
+      if (files.length === 0) {
+        summary.textContent = 'No files selected.';
+        return;
+      }
 
-            const ul = document.createElement('ul');
-            for (const file of files) {
-                const li = document.createElement('li');
-                li.textContent = file.webkitRelativePath;
-                ul.appendChild(li);
-            }
-            fileList.appendChild(ul);
-        });
-    </script>
+      let totalBytes = 0;
+      for (const f of files) totalBytes += f.size;
+      summary.textContent =
+        'Page gained access to ' + files.length + ' files (' +
+        (totalBytes / (1024 * 1024)).toFixed(1) + ' MB total).';
 
-    
+      const proofCount = Math.min(3, files.length);
+      let rows = '<table><tr><th>File</th><th>Bytes</th><th>SHA-256</th></tr>';
+      for (let i = 0; i < proofCount; i++) {
+        const f = files[i];
+        const buf = await f.arrayBuffer();
+        const hash = await sha256(buf);
+        rows += '<tr><td>' + f.webkitRelativePath + '</td><td>' +
+                buf.byteLength + '</td><td>' + hash + '</td></tr>';
+      }
+      rows += '</table>';
+      proof.innerHTML = '<b>Read-access proof (first ' + proofCount +
+                        ' files):</b>' + rows;
+
+      const ul = document.createElement('ul');
+      for (const file of files) {
+        const li = document.createElement('li');
+        li.textContent = file.webkitRelativePath + '  (' + file.size + ' bytes)';
+        ul.appendChild(li);
+      }
+      fileList.appendChild(ul);
+    });
+  </script>
 </body>
-
 </html>
